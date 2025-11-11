@@ -50,7 +50,7 @@ def parse_args():
     
     # 数据相关参数
     parser.add_argument('--data_dir', type=str, 
-                      default='/Users/zhuyifan/Desktop/学习/大三/cluster/task2/Image_Anomaly_Detection',
+                      default='./Image_Anomaly_Detection',
                       help='数据集路径')
     parser.add_argument('--category', type=str, default='hazelnut', 
                       choices=['hazelnut', 'zipper'],
