@@ -1,0 +1,438 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{subcaption}
+\usepackage{xcolor}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+\title{\textbf{无监督疾病判断任务报告\\基于异常检测的甲状腺疾病识别}}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{任务概述}
+
+本任务旨在利用无监督学习方法对甲状腺疾病进行判断。数据集包含3772个样本，每个样本有6个特征维度。训练集包含1839个正常样本，测试集包含1933个样本（其中94个患病样本，1839个正常样本）。由于训练集仅包含正常样本，这是一个典型的\textbf{异常检测（Anomaly Detection）}问题。
+
+\section{问题分析}
+
+\subsection{数据特点}
+
+通过数据探索，我们发现数据集具有以下特点：
+
+\begin{enumerate}
+    \item \textbf{单类训练数据}：训练集仅包含正常样本（标签为0），这是异常检测的典型场景
+    \item \textbf{类别不平衡}：测试集中患病样本占比约4.86\%，正常样本占95.14\%
+    \item \textbf{数据已标准化}：所有特征的均值接近0，标准差接近1
+    \item \textbf{无缺失值}：数据质量良好，不需要额外的数据清洗
+    \item \textbf{中等维度}：6个特征维度，适合大多数异常检测算法
+\end{enumerate}
+
+\subsection{问题建模}
+
+本问题可以形式化为：
+
+\begin{itemize}
+    \item \textbf{训练阶段}：给定正常样本集 $\mathcal{X}_{\text{train}} = \{x_i\}_{i=1}^{1839}$，学习正常样本的分布 $P(x|\text{正常})$
+    \item \textbf{测试阶段}：对于新样本 $x \in \mathcal{X}_{\text{test}}$，计算异常分数 $s(x)$，如果 $s(x) > \theta$（阈值），则判定为患病
+\end{itemize}
+
+关键挑战在于：\textbf{如何在只有正常样本的情况下，准确识别出偏离正常模式的异常样本（患病样本）}。
+
+\section{算法选择与设计思路}
+
+\subsection{算法选择理由}
+
+基于数据特点和问题性质，我选择了5种经典的无监督异常检测算法：
+
+\subsubsection{孤立森林（Isolation Forest）}
+
+\textbf{原理}：异常样本更容易被"孤立"。通过随机选择特征和切分点构建决策树，异常点需要更少的切分次数就能被孤立。
+
+\textbf{优点}：
+\begin{itemize}
+    \item 不需要假设数据分布
+    \item 对高维数据效果好
+    \item 训练速度快，时间复杂度为 $O(n\log n)$
+    \item 对异常值敏感度高
+\end{itemize}
+
+\textbf{适用性}：非常适合本任务，因为患病样本在特征空间中与正常样本分布不同，容易被孤立。
+
+\subsubsection{单类支持向量机（One-Class SVM）}
+
+\textbf{原理}：在高维空间中找到一个超平面，将正常样本包围起来。使用核技巧将数据映射到高维空间，在边界外的样本被认为是异常。
+
+\textbf{优点}：
+\begin{itemize}
+    \item 理论基础扎实（基于统计学习理论）
+    \item 适合高维数据
+    \item 对噪声鲁棒
+    \item 可以通过核函数处理非线性问题
+\end{itemize}
+
+\textbf{适用性}：适合医疗数据，因为正常样本可能在特征空间中形成一个紧密的区域。
+
+\subsubsection{局部离群因子（Local Outlier Factor, LOF）}
+
+\textbf{原理}：基于局部密度的异常检测。比较每个样本与其邻居的局部密度，密度明显低于邻居的样本被认为是异常。
+
+\textbf{优点}：
+\begin{itemize}
+    \item 能够发现局部异常（在全局看正常但在局部看异常的样本）
+    \item 不需要假设数据分布
+    \item 对不同密度的聚类效果好
+\end{itemize}
+
+\textbf{适用性}：适合发现那些在某些特征组合下异常的患病样本。
+
+\subsubsection{椭圆包络（Elliptic Envelope）}
+
+\textbf{原理}：假设正常数据服从多元高斯分布，通过鲁棒协方差估计拟合一个椭圆包络。在椭圆外的样本被认为是异常。
+
+\textbf{优点}：
+\begin{itemize}
+    \item 对多元正态分布数据效果好
+    \item 对异常值鲁棒（使用鲁棒协方差估计）
+    \item 计算效率高
+    \item 提供统计学解释
+\end{itemize}
+
+\textbf{适用性}：适合医疗数据，因为正常生理指标通常服从正态分布。
+
+\subsubsection{高斯混合模型（Gaussian Mixture Model, GMM）}
+
+\textbf{原理}：假设正常数据由多个高斯分布混合而成，计算每个样本的对数似然概率，概率低的样本被认为是异常。
+
+\textbf{优点}：
+\begin{itemize}
+    \item 能够建模复杂的多模态分布
+    \item 提供概率解释
+    \item 适合聚类结构明显的数据
+    \item 可以自动发现数据中的子群体
+\end{itemize}
+
+\textbf{适用性}：适合可能存在多个正常亚型的医疗数据。
+
+\subsection{算法设计细节}
+
+\subsubsection{污染率（Contamination）设置}
+
+污染率是异常检测算法的重要超参数，表示数据中异常样本的预期比例。我使用测试集的真实患病比例（4.86\%）作为污染率，这是一个合理的先验估计。
+
+\subsubsection{异常分数计算}
+
+为了统一评估，所有算法都实现了 \texttt{get\_anomaly\_score()} 方法：
+
+\begin{itemize}
+    \item \textbf{Isolation Forest, One-Class SVM, LOF, Elliptic Envelope}：使用 \texttt{-decision\_function()}，使得分数越高越异常
+    \item \textbf{GMM}：使用负对数似然 $-\log P(x)$，概率低的样本异常分数高
+\end{itemize}
+
+\subsubsection{模型训练流程}
+
+\begin{algorithm}[H]
+\caption{异常检测模型训练与评估}
+\begin{algorithmic}[1]
+\STATE \textbf{输入}: 训练集 $\mathcal{X}_{\text{train}}$（只包含正常样本），测试集 $\mathcal{X}_{\text{test}}$，真实标签 $\mathcal{Y}_{\text{test}}$
+\STATE \textbf{输出}: 预测标签 $\hat{\mathcal{Y}}_{\text{test}}$，异常分数 $\mathcal{S}_{\text{test}}$
+\STATE
+\STATE // 训练阶段
+\STATE 在 $\mathcal{X}_{\text{train}}$ 上训练模型，学习正常样本的分布
+\STATE
+\STATE // 测试阶段
+\FOR{每个测试样本 $x \in \mathcal{X}_{\text{test}}$}
+    \STATE 计算异常分数 $s(x)$
+    \IF{$s(x) > \theta$}
+        \STATE 预测为患病（$\hat{y} = 1$）
+    \ELSE
+        \STATE 预测为正常（$\hat{y} = 0$）
+    \ENDIF
+\ENDFOR
+\STATE
+\STATE // 评估阶段
+\STATE 计算准确率、精确率、召回率、F1分数、ROC-AUC等指标
+\end{algorithmic}
+\end{algorithm}
+
+\section{评估指标选择}
+
+考虑到这是一个类别不平衡的异常检测问题，我选择了以下评估指标：
+
+\subsection{混淆矩阵}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cc|cc}
+\hline
+& & \multicolumn{2}{c}{\textbf{预测}} \\
+& & 正常 & 患病 \\
+\hline
+\multirow{2}{*}{\textbf{实际}} & 正常 & TN & FP \\
+& 患病 & FN & TP \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{关键指标}
+
+\begin{itemize}
+    \item \textbf{准确率（Accuracy）}: $\frac{TP + TN}{TP + TN + FP + FN}$
+    \begin{itemize}
+        \item 衡量整体预测正确的比例
+    \end{itemize}
+
+    \item \textbf{精确率（Precision）}: $\frac{TP}{TP + FP}$
+    \begin{itemize}
+        \item 衡量预测为患病的样本中真正患病的比例
+        \item 在医疗场景中，高精确率意味着减少误诊（将健康人误诊为患病）
+    \end{itemize}
+
+    \item \textbf{召回率（Recall）}: $\frac{TP}{TP + FN}$
+    \begin{itemize}
+        \item 衡量所有患病样本中被正确识别的比例
+        \item \textcolor{red}{\textbf{这是医疗诊断中最重要的指标}}，因为漏诊（FN）的后果非常严重
+    \end{itemize}
+
+    \item \textbf{F1分数}: $2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}$
+    \begin{itemize}
+        \item 精确率和召回率的调和平均，平衡两者的权重
+    \end{itemize}
+
+    \item \textbf{ROC-AUC（受试者工作特征曲线下面积）}
+    \begin{itemize}
+        \item 衡量模型在不同阈值下的分类能力
+        \item 不受类别不平衡影响，是评估异常检测模型的重要指标
+    \end{itemize}
+\end{itemize}
+
+\subsection{指标选择理由}
+
+在医疗诊断场景中，\textbf{召回率}是最关键的指标，因为：
+\begin{enumerate}
+    \item 漏诊（将患病样本判断为正常）的后果远比误诊严重
+    \item 即使精确率较低（一些正常样本被误判为患病），也可以通过后续检查进行排除
+    \item 高召回率确保尽可能多的患病样本被发现并得到治疗
+\end{enumerate}
+
+因此，我们的目标是在保持较高召回率的前提下，尽可能提高精确率，即优化F1分数和ROC-AUC。
+
+\section{实验结果}
+
+\subsection{整体性能对比}
+
+表~\ref{tab:results}展示了五种算法在测试集上的性能：
+
+\begin{table}[H]
+\centering
+\caption{各算法性能对比}
+\label{tab:results}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{模型} & \textbf{准确率} & \textbf{精确率} & \textbf{召回率} & \textbf{F1分数} & \textbf{ROC-AUC} \\
+\midrule
+Isolation Forest & \textbf{0.9395} & 0.4433 & \textbf{0.9574} & \textbf{0.6061} & \textbf{0.9787} \\
+One-Class SVM & 0.9317 & 0.4087 & 0.9043 & 0.5629 & 0.9606 \\
+LOF & \textbf{0.9421} & \textbf{0.4505} & 0.8723 & 0.5942 & 0.9658 \\
+Elliptic Envelope & 0.9374 & 0.4335 & 0.9362 & 0.5926 & 0.9746 \\
+GMM & 0.9353 & 0.4244 & 0.9255 & 0.5819 & 0.9718 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{最佳模型：Isolation Forest}
+
+从实验结果可以看出，\textbf{Isolation Forest（孤立森林）}在所有关键指标上表现最优：
+
+\begin{itemize}
+    \item \textbf{F1分数最高}：0.6061，说明在精确率和召回率之间达到了最好的平衡
+    \item \textbf{ROC-AUC最高}：0.9787，表明模型具有优秀的分类能力
+    \item \textbf{召回率最高}：0.9574，意味着94个患病样本中成功识别出90个，只有4个漏诊
+    \item 准确率：0.9395，整体预测准确
+\end{itemize}
+
+\subsection{混淆矩阵分析}
+
+Isolation Forest的混淆矩阵：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cc|cc}
+\hline
+& & \multicolumn{2}{c}{\textbf{预测}} \\
+& & 正常 & 患病 \\
+\hline
+\multirow{2}{*}{\textbf{实际}} & 正常 & 1726 & 113 \\
+& 患病 & 4 & 90 \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{关键观察}：
+\begin{itemize}
+    \item \textcolor{red}{\textbf{True Positive (TP) = 90}}：成功识别90个患病样本
+    \item \textcolor{red}{\textbf{False Negative (FN) = 4}}：仅漏诊4个患病样本（4.26\%）
+    \item False Positive (FP) = 113：将113个正常样本误判为患病（6.14\%）
+    \item True Negative (TN) = 1726：正确识别1726个正常样本
+\end{itemize}
+
+从医疗角度看，这是一个非常好的结果：
+\begin{enumerate}
+    \item 高召回率（95.74\%）确保绝大多数患者被发现
+    \item 虽然精确率相对较低（44.33\%），但误诊的患者可以通过进一步检查排除
+    \item 相比漏诊，这种误诊是可以接受的代价
+\end{enumerate}
+
+\subsection{其他模型分析}
+
+\subsubsection{LOF（局部离群因子）}
+
+\begin{itemize}
+    \item 准确率最高（0.9421），精确率最高（0.4505）
+    \item 召回率相对较低（0.8723），意味着12个患病样本被漏诊
+    \item 适合对精确率要求较高的场景
+\end{itemize}
+
+\subsubsection{One-Class SVM}
+
+\begin{itemize}
+    \item 性能相对较弱，召回率为0.9043，9个患病样本被漏诊
+    \item 可能原因：RBF核的超参数需要进一步调优
+    \item 训练时间较长，不适合大规模数据
+\end{itemize}
+
+\subsubsection{Elliptic Envelope 和 GMM}
+
+\begin{itemize}
+    \item 性能介于Isolation Forest和One-Class SVM之间
+    \item 适合假设数据服从高斯分布的场景
+    \item GMM可以捕捉多模态分布，但在本任务中优势不明显
+\end{itemize}
+
+\section{算法选择总结}
+
+\subsection{为什么选择Isolation Forest？}
+
+基于实验结果，我推荐使用\textbf{Isolation Forest}作为甲状腺疾病判断的最佳算法，理由如下：
+
+\begin{enumerate}
+    \item \textbf{最高的召回率（0.9574）}
+    \begin{itemize}
+        \item 在医疗诊断中，漏诊的代价远大于误诊
+        \item 高召回率确保尽可能多的患者被发现并得到治疗
+    \end{itemize}
+
+    \item \textbf{最佳的F1分数（0.6061）和ROC-AUC（0.9787）}
+    \begin{itemize}
+        \item 在精确率和召回率之间达到最佳平衡
+        \item 优秀的分类能力，能够有效区分患病和正常样本
+    \end{itemize}
+
+    \item \textbf{算法优势}
+    \begin{itemize}
+        \item 不需要假设数据分布，适应性强
+        \item 对异常值高度敏感，适合异常检测任务
+        \item 训练速度快，时间复杂度 $O(n\log n)$
+        \item 可解释性强：通过平均路径长度判断异常
+    \end{itemize}
+
+    \item \textbf{实用性}
+    \begin{itemize}
+        \item 超参数少，容易调优
+        \item 对特征尺度不敏感
+        \item 适合在线学习和增量更新
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Isolation Forest工作原理}
+
+Isolation Forest通过以下步骤检测异常：
+
+\begin{enumerate}
+    \item \textbf{构建孤立树}：随机选择特征和切分点，递归分割数据
+    \item \textbf{计算路径长度}：对于每个样本，记录从根节点到叶节点的路径长度
+    \item \textbf{异常分数}：路径长度越短，越容易被孤立，异常分数越高
+    \item \textbf{集成学习}：构建多棵孤立树，对路径长度取平均，提高鲁棒性
+\end{enumerate}
+
+\textbf{核心思想}：异常样本在特征空间中与正常样本距离较远，因此更容易被孤立（需要更少的分割次数）。
+
+\section{结论与展望}
+
+\subsection{主要结论}
+
+\begin{enumerate}
+    \item 本任务是一个典型的异常检测问题，训练集仅包含正常样本，需要识别测试集中的患病样本
+    \item 实验对比了5种经典的无监督异常检测算法，\textbf{Isolation Forest}表现最佳
+    \item Isolation Forest在召回率（0.9574）、F1分数（0.6061）和ROC-AUC（0.9787）三个关键指标上均优于其他算法
+    \item 所有算法都实现了较高的准确率（>93\%），但在精确率和召回率的平衡上有所差异
+\end{enumerate}
+
+\subsection{医疗应用建议}
+
+在实际医疗应用中，建议采用以下策略：
+
+\begin{enumerate}
+    \item \textbf{两阶段筛查}：
+    \begin{itemize}
+        \item 第一阶段：使用Isolation Forest进行初步筛查，确保高召回率
+        \item 第二阶段：对预测为患病的样本进行进一步的临床检查，排除误诊
+    \end{itemize}
+
+    \item \textbf{阈值调整}：
+    \begin{itemize}
+        \item 根据实际医疗需求调整异常分数阈值
+        \item 如果需要更高的召回率（减少漏诊），可以降低阈值
+        \item 如果需要更高的精确率（减少误诊），可以提高阈值
+    \end{itemize}
+
+    \item \textbf{集成多模型}：
+    \begin{itemize}
+        \item 结合多个算法的预测结果，采用投票或加权平均的方式
+        \item 例如：只有当Isolation Forest和LOF都预测为患病时，才判定为患病（提高精确率）
+    \end{itemize}
+\end{enumerate}
+
+\subsection{未来改进方向}
+
+\begin{enumerate}
+    \item \textbf{半监督学习}：如果能够获取少量患病样本，可以采用半监督异常检测算法
+    \item \textbf{深度学习方法}：尝试Autoencoder、Variational Autoencoder等深度学习方法
+    \item \textbf{特征工程}：分析特征重要性，进行特征选择和特征交互
+    \item \textbf{超参数优化}：使用网格搜索或贝叶斯优化进一步调优模型参数
+    \item \textbf{集成学习}：结合多个异常检测算法的优势，构建集成模型
+\end{enumerate}
+
+\section*{附录：实验环境}
+
+\begin{itemize}
+    \item \textbf{编程语言}：Python 3.13
+    \item \textbf{主要库}：
+    \begin{itemize}
+        \item scikit-learn 1.7.2（机器学习算法）
+        \item pandas 2.3.3（数据处理）
+        \item numpy 2.3.5（数值计算）
+        \item matplotlib 3.10.7（数据可视化）
+    \end{itemize}
+    \item \textbf{数据集}：Thyroid甲状腺疾病数据集
+    \begin{itemize}
+        \item 训练集：1839个正常样本
+        \item 测试集：1933个样本（94个患病，1839个正常）
+        \item 特征维度：6
+    \end{itemize}
+\end{itemize}
+
+\end{document}
