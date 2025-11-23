@@ -1,0 +1,278 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[UTF8]{ctex}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\geometry{left=2.5cm,right=2.5cm,top=3cm,bottom=3cm}
+
+\title{时间序列预测任务报告\\室外温度预测}
+\author{数据挖掘课程作业}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{引言}
+
+本报告针对气象数据的时间序列预测任务，使用深度学习模型预测室外温度（OT）的变化。数据集包含德国某气象站半年内的气象数据，共26200个数据点，时间间隔为每10分钟记录一次。本报告将从数据预处理、模型设计和模型评估三个方面详细介绍实验过程。
+
+\section{数据预处理}
+
+\subsection{数据集描述}
+
+数据集包含20个气象特征指标，包括：
+\begin{itemize}
+    \item 气压相关：p (mbar), VPmax (mbar), VPact (mbar), VPdef (mbar)
+    \item 温度相关：T (degC), Tpot (K), Tdew (degC), Tlog (degC)
+    \item 湿度相关：rh (\%), sh (g/kg), H2OC (mmol/mol)
+    \item 风速相关：wv (m/s), max. wv (m/s), wd (deg)
+    \item 降水相关：rain (mm), raining (s)
+    \item 辐射相关：SWDR (W/m$^2$), PAR (umol/m$^2$s), max. PAR (umol/m$^2$s)
+    \item 其他：rho (g/m$^3$)
+\end{itemize}
+
+目标变量为室外温度（OT），数据总量为26200个样本。
+
+\subsection{特征标准化}
+
+由于不同特征具有不同的量纲和数值范围，直接使用原始数据会导致模型训练不稳定。因此，我们使用StandardScaler对特征进行标准化处理：
+
+\begin{equation}
+z = \frac{x - \mu}{\sigma}
+\end{equation}
+
+其中，$\mu$为特征的均值，$\sigma$为标准差。标准化后的特征均值为0，标准差为1，有助于模型收敛和提高预测精度。
+
+\subsection{滑动窗口切分}
+
+时间序列预测需要将历史数据转换为监督学习问题。我们采用滑动窗口方法，将时间序列数据转换为序列-标签对。
+
+对于窗口大小为$w$的滑动窗口，我们使用过去$w$个时间点的特征来预测下一个时间点的目标值。具体而言：
+\begin{itemize}
+    \item 输入序列：$X_t = [x_{t-w+1}, x_{t-w+2}, \ldots, x_t]$，其中$x_i$为第$i$个时间点的20维特征向量
+    \item 输出标签：$y_t = OT_{t+1}$，即下一个时间点的室外温度
+\end{itemize}
+
+在本实验中，我们使用窗口大小为24（对应4小时的历史数据，每10分钟一个时间点）来构建训练样本。通过滑动窗口切分，原始数据被转换为形状为$(N-w, w, 20)$的输入序列和形状为$(N-w,)$的目标标签，其中$N$为原始数据点数量。
+
+\subsection{训练集与测试集划分}
+
+考虑到时间序列数据的时序特性，我们采用时间顺序划分方法，确保训练集的时间早于测试集，避免数据泄露问题。具体划分方式如下：
+
+\begin{itemize}
+    \item 训练集：前80\%的数据，共20947个样本
+    \item 测试集：后20\%的数据，共5237个样本
+\end{itemize}
+
+这种划分方式保证了模型在训练时只能看到历史数据，在测试时预测未来数据，更符合实际应用场景。
+
+\section{模型设计}
+
+\subsection{模型架构}
+
+本实验设计了一个基于LSTM（Long Short-Term Memory）神经网络和注意力机制的时间序列预测模型，主要包含以下组件：
+
+
+\subsubsection{LSTM层}
+
+LSTM是一种特殊的循环神经网络（RNN），能够有效处理长序列依赖关系。本模型使用3层LSTM，隐藏层维度为256。LSTM的核心思想是通过门控机制（遗忘门、输入门、输出门）来控制信息的流动，从而解决传统RNN的梯度消失问题。
+
+对于输入序列$X_t = [x_1, x_2, \ldots, x_w]$，LSTM层逐时间步处理，最终输出形状为$(batch\_size, w, 256)$的序列表示。
+
+\subsubsection{注意力机制}
+
+为了捕捉不同时间步对预测结果的重要性，我们在LSTM层后添加了注意力机制。注意力机制通过计算每个时间步的注意力权重，对LSTM输出进行加权求和，得到上下文向量：
+
+\begin{equation}
+\alpha_i = \frac{\exp(e_i)}{\sum_{j=1}^{w}\exp(e_j)}
+\end{equation}
+
+\begin{equation}
+c = \sum_{i=1}^{w}\alpha_i \cdot h_i
+\end{equation}
+
+其中，$e_i$为第$i$个时间步的注意力分数，$h_i$为LSTM在第$i$个时间步的输出，$c$为最终的上下文向量。
+
+\subsubsection{全连接层}
+
+全连接层将注意力机制输出的上下文向量（256维）映射到最终的预测值。本模型使用三层全连接网络：
+\begin{itemize}
+    \item 第一层：256 $\rightarrow$ 128，ReLU激活函数，Dropout=0.3
+    \item 第二层：128 $\rightarrow$ 64，ReLU激活函数，Dropout=0.3
+    \item 第三层：64 $\rightarrow$ 1，线性输出
+\end{itemize}
+
+Dropout层用于防止过拟合，提高模型的泛化能力。
+
+\subsection{模型参数}
+
+模型的主要超参数设置如下：
+\begin{itemize}
+    \item 输入维度：20（特征数量）
+    \item LSTM隐藏层维度：256
+    \item LSTM层数：3
+    \item Dropout比率：0.3
+    \item 全连接层隐藏维度：128
+    \item 批次大小：32
+    \item 学习率：0.0003
+    \item 优化器：Adam（带L2正则化，权重衰减=1e-5）
+    \item 损失函数：均方误差（MSE）
+\end{itemize}
+
+\subsection{训练策略}
+
+模型训练采用以下策略：
+\begin{itemize}
+    \item 使用早停机制（Early Stopping），耐心值为20，当验证损失连续20个epoch不下降时停止训练
+    \item 使用学习率衰减策略（ReduceLROnPlateau），当验证损失不下降时降低学习率
+    \item 保存验证损失最低的模型作为最佳模型
+    \item 最大训练轮数为300轮
+\end{itemize}
+
+模型最终训练了66个epoch，训练过程如图\ref{fig:training_history}所示。
+
+\section{模型评估}
+
+\subsection{评估指标}
+
+为了全面评估模型性能，我们选择了多个评估指标：
+
+\subsubsection{回归指标}
+
+\begin{itemize}
+    \item \textbf{均方误差（MSE）}：
+    \begin{equation}
+    \text{MSE} = \frac{1}{n}\sum_{i=1}^{n}(y_i - \hat{y}_i)^2
+    \end{equation}
+    
+    \item \textbf{平均绝对误差（MAE）}：
+    \begin{equation}
+    \text{MAE} = \frac{1}{n}\sum_{i=1}^{n}|y_i - \hat{y}_i|
+    \end{equation}
+    
+    \item \textbf{均方根误差（RMSE）}：
+    \begin{equation}
+    \text{RMSE} = \sqrt{\frac{1}{n}\sum_{i=1}^{n}(y_i - \hat{y}_i)^2}
+    \end{equation}
+    
+    \item \textbf{决定系数（R²）}：
+    \begin{equation}
+    R^2 = 1 - \frac{\sum_{i=1}^{n}(y_i - \hat{y}_i)^2}{\sum_{i=1}^{n}(y_i - \bar{y})^2}
+    \end{equation}
+    其中$\bar{y}$为目标值的均值。R²越接近1，说明模型解释能力越强。
+    
+    \item \textbf{平均绝对百分比误差（MAPE）}：
+    \begin{equation}
+    \text{MAPE} = \frac{100}{n}\sum_{i=1}^{n}\left|\frac{y_i - \hat{y}_i}{y_i}\right|
+    \end{equation}
+\end{itemize}
+
+\subsubsection{准确率指标}
+
+为了更直观地评估模型性能，我们还计算了基于相对误差阈值的准确率：
+\begin{itemize}
+    \item 准确率（5\%）：相对误差小于5\%的样本比例
+    \item 准确率（10\%）：相对误差小于10\%的样本比例
+    \item 准确率（20\%）：相对误差小于20\%的样本比例
+\end{itemize}
+
+\subsection{测试集评估结果}
+
+模型在测试集上的评估结果如表\ref{tab:results}所示。
+
+\begin{table}[H]
+\centering
+\caption{模型在测试集上的评估结果}
+\label{tab:results}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{评估指标} & \textbf{数值} \\
+\midrule
+MSE & 252.77 \\
+MAE & 10.13 \\
+RMSE & 15.90 \\
+R² & 0.505 \\
+MAPE & 2.28\% \\
+\midrule
+准确率（5\%） & 88.94\% \\
+准确率（10\%） & 97.61\% \\
+准确率（20\%） & 100.00\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从评估结果可以看出：
+\begin{itemize}
+    \item R²达到0.505，说明模型能够解释约50.5\%的数据变异，具有较好的预测能力
+    \item MAE为10.13，RMSE为15.90，说明平均预测误差较小
+    \item MAPE为2.28\%，说明相对误差很小
+    \item 97.61\%的样本预测误差在10\%以内，88.94\%的样本预测误差在5\%以内，准确率较高
+\end{itemize}
+
+\subsection{可视化分析}
+
+\subsubsection{预测结果对比}
+
+图\ref{fig:predictions}展示了模型在测试集上的预测结果与真实值的对比。从图中可以看出，预测值与真实值基本吻合，模型能够较好地捕捉温度变化的趋势。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{visualizations/predictions.png}
+\caption{测试集预测结果对比}
+\label{fig:predictions}
+\end{figure}
+
+\subsubsection{预测散点图}
+
+图\ref{fig:scatter}展示了预测值与真实值的散点图。理想情况下，所有点应该落在$y=x$直线上。从图中可以看出，大部分点都集中在对角线附近，说明模型预测较为准确。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{visualizations/prediction_scatter.png}
+\caption{预测值vs真实值散点图}
+\label{fig:scatter}
+\end{figure}
+
+\subsubsection{误差分布}
+
+图\ref{fig:error_dist}展示了预测误差的分布情况。误差分布接近正态分布，均值接近0，说明模型预测无系统性偏差。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{visualizations/error_distribution.png}
+\caption{预测误差分布}
+\label{fig:error_dist}
+\end{figure}
+
+\subsubsection{残差分析}
+
+图\ref{fig:residuals}展示了残差图，用于检查模型的假设是否成立。从图中可以看出，残差基本随机分布，无明显模式，说明模型假设合理。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{visualizations/residuals.png}
+\caption{残差分析图}
+\label{fig:residuals}
+\end{figure}
+
+\section{结论}
+
+本实验成功构建了一个基于LSTM和注意力机制的时间序列预测模型，用于预测室外温度变化。通过以下关键步骤：
+
+\begin{enumerate}
+    \item \textbf{数据预处理}：对20个气象特征进行标准化处理，使用滑动窗口方法将时间序列转换为监督学习问题，按时间顺序划分训练集和测试集
+    \item \textbf{模型设计}：设计了包含3层LSTM、注意力机制和3层全连接网络的深度学习模型，能够有效捕捉时间序列的长期依赖关系
+    \item \textbf{模型评估}：在测试集上使用多个评估指标进行评估，R²达到0.505，97.61\%的样本预测误差在10\%以内，模型表现良好
+\end{enumerate}
+
+实验结果表明，该模型能够较好地预测室外温度变化，具有一定的实用价值。未来可以进一步优化模型结构，增加特征工程，或尝试集成学习方法以提升模型性能。
+
+\end{document}
+
