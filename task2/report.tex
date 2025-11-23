@@ -68,17 +68,17 @@
 对于测试样本 $y$，我们计算其重构误差作为异常分数：
 
 \begin{equation}
-	ext{anomaly\_score}(y) = d(y, f(y))
+\text{anomaly\_score}(y) = d(y, f(y))
 \end{equation}
 
 其中 $d(\cdot, \cdot)$ 是某种距离度量（如MSE、MAE等）。
 
-设定一个阈值 $	au$，如果异常分数大于 $	au$，则将样本判定为异常，否则判定为正常：
+设定一个阈值 $\tau$，如果异常分数大于 $\tau$，则将样本判定为异常，否则判定为正常：
 
 \begin{equation}
-	ext{prediction}(y) = \begin{cases} 
-	ext{anomaly}, & 	ext{if } 	ext{anomaly\_score}(y) > \tau \\ 
-	ext{normal}, & 	ext{otherwise} 
+\text{prediction}(y) = \begin{cases} 
+\text{anomaly}, & \text{if } \text{anomaly\_score}(y) > \tau \\ 
+\text{normal}, & \text{otherwise} 
 \end{cases}
 \end{equation}
 
@@ -315,7 +315,7 @@ VAE & 0.XXXX & 0.XXXX & 0.XXXX & 0.XXXX & 0.XXXX \\
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{results/error_distribution.png}
+\includegraphics[width=0.8\textwidth]{output/hazelnut_autoencoder_20251111_224128/reconstruction_error_distribution.png}
 \caption{重构误差分布对比}
 \label{fig:error_dist}
 \end{figure}
@@ -326,7 +326,7 @@ VAE & 0.XXXX & 0.XXXX & 0.XXXX & 0.XXXX & 0.XXXX \\
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{results/roc_curve.png}
+\includegraphics[width=0.8\textwidth]{output/hazelnut_autoencoder_20251111_224128/roc_curve.png}
 \caption{ROC曲线对比}
 \label{fig:roc_curve}
 \end{figure}
@@ -419,11 +419,11 @@ VAE & 0.XXXX & 0.XXXX & 0.XXXX & 0.XXXX & 0.XXXX \\
 
 \begin{enumerate}
     \item Vincent, P., et al. (2008). Extracting and composing robust features with denoising autoencoders.
-    \item Kingma, D. P., & Welling, M. (2013). Auto-encoding variational bayes.
+    \item Kingma, D. P., \& Welling, M. (2013). Auto-encoding variational bayes.
     \item Goodfellow, I., et al. (2014). Generative adversarial nets.
     \item Schölkopf, B., et al. (2001). Estimating the support of a high-dimensional distribution.
     \item Ruff, L., et al. (2021). Deep one-class classification.
-    \item Chalapathy, R., & Chawla, S. (2019). Deep learning for anomaly detection: A survey.
+    \item Chalapathy, R., \& Chawla, S. (2019). Deep learning for anomaly detection: A survey.
 \end{enumerate}
 
 \end{document}
