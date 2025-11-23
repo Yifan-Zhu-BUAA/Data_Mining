@@ -7,6 +7,11 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+# 设置matplotlib支持中文显示
+# 尝试使用多种可能在系统中可用的中文字体
+plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Heiti TC', 'WenQuanYi Micro Hei', 'SimHei', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 from sklearn.metrics import roc_curve, precision_recall_curve
 import torch
 from torchvision.utils import make_grid
@@ -312,11 +317,24 @@ def save_results_to_json(metrics, save_path):
         save_path (str): 保存路径
     """
     import json
+    import torch
+    import numpy as np
     
-    # 转换numpy数组为列表
-    serializable_metrics = metrics.copy()
-    if 'confusion_matrix' in serializable_metrics:
-        serializable_metrics['confusion_matrix'] = serializable_metrics['confusion_matrix'].tolist()
+    # 递归转换非JSON可序列化对象为可序列化类型
+    def make_serializable(obj):
+        if isinstance(obj, (torch.Tensor, np.ndarray)):
+            return obj.tolist()
+        elif isinstance(obj, (np.float32, np.float64, np.int32, np.int64)):
+            return float(obj) if isinstance(obj, (np.float32, np.float64)) else int(obj)
+        elif isinstance(obj, dict):
+            return {key: make_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [make_serializable(item) for item in obj]
+        else:
+            return obj
+    
+    # 转换所有非JSON可序列化对象
+    serializable_metrics = make_serializable(metrics)
     
     # 确保目录存在
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
