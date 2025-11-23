@@ -15,7 +15,7 @@ from datetime import datetime
 from data_loader import get_dataloaders, get_normal_only_dataloader
 # 不再需要特征提取器
 from autoencoder import Autoencoder, VariationalAutoencoder
-from trainer import train_autoencoder, detect_anomalies, evaluate_model
+from trainer import train_autoencoder, detect_anomalies, evaluate_model, compute_reconstruction_error
 from visualization import (
     plot_training_history,
     plot_reconstruction_error_distribution,
@@ -66,6 +66,8 @@ def parse_args():
                       help='模型类型')
     parser.add_argument('--latent_dim', type=int, default=128,
                       help='潜在空间维度')
+    parser.add_argument('--model_path', type=str, default=None,
+                      help='预训练模型路径，如果提供则直接加载模型而不进行训练')
     # 不再需要特征提取器相关参数
     
     # 训练相关参数
@@ -138,14 +140,12 @@ def main():
     # 对于验证集，我们可以使用部分测试集数据
     val_loader = test_loader
     
-    # 2. 创建模型
+    # 2. 创建或加载模型
     print(f'\n创建{args.model_type}模型...')
     
     # 获取图像通道数和尺寸
     image_channels = 3
     image_size = 224
-    
-    # 不再需要特征提取器，自编码器直接处理图像
     
     # 创建自编码器或变分自编码器
     if args.model_type == 'autoencoder':
@@ -161,37 +161,60 @@ def main():
     
     model = model.to(device)
     
-    # 3. 训练模型
-    print('\n开始训练模型...')
-    history = train_autoencoder(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        num_epochs=args.epochs,
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-        device=device,
-        checkpoint_dir=output_dir,
-        is_vae=(args.model_type == 'vae')
-    )
-    
-    # 绘制训练历史
-    if args.visualize:
-        history_path = os.path.join(output_dir, 'training_history.png')
-        plot_training_history(history, history_path)
-        print(f'训练历史已保存至: {history_path}')
-    
-    # 保存模型
-    if args.save_model:
-        model_path = os.path.join(output_dir, f'{args.model_type}_best_model.pth')
-        torch.save(model.state_dict(), model_path)
-        print(f'最佳模型已保存至: {model_path}')
+    # 是否加载预训练模型
+    if args.model_path:
+        # 处理相对路径，转换为绝对路径
+        model_path = os.path.abspath(args.model_path)
+        print(f'\n加载预训练模型: {model_path}')
+        if not os.path.exists(model_path):
+            print(f"错误: 找不到模型文件 '{model_path}'")
+            exit(1)
+        # 加载保存的检查点字典
+        checkpoint = torch.load(model_path, map_location=device)
+        # 提取模型状态字典
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print('从检查点提取并加载模型状态字典')
+        else:
+            # 尝试直接加载（兼容旧格式）
+            model.load_state_dict(checkpoint)
+            print('直接加载模型状态字典')
+        model.eval()
+        print('预训练模型加载成功！')
+        # 不需要训练历史
+        history = None
+    else:
+        # 3. 训练模型
+        print('\n开始训练模型...')
+        history = train_autoencoder(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            num_epochs=args.epochs,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            device=device,
+            checkpoint_dir=output_dir,
+            is_vae=(args.model_type == 'vae')
+        )
+        
+        # 绘制训练历史
+        if args.visualize and history:
+            history_path = os.path.join(output_dir, 'training_history.png')
+            plot_training_history(history, history_path)
+            print(f'训练历史已保存至: {history_path}')
+        
+        # 保存模型
+        if args.save_model:
+            model_path = os.path.join(output_dir, f'{args.model_type}_best_model.pth')
+            torch.save(model.state_dict(), model_path)
+            print(f'最佳模型已保存至: {model_path}')
     
     # 4. 在验证集上确定最佳阈值
-    print('\n在验证集上寻找最佳阈值...')
+    print('\n计算验证集上的重建误差...')
     
-    # 提取验证集特征并检测异常
-    val_errors, val_labels, val_paths = detect_anomalies(
+    # 提取验证集特征并计算重建误差
+    val_errors, val_labels, val_paths = compute_reconstruction_error(
         model=model,
         dataloader=val_loader,
         device=device,
@@ -206,8 +229,8 @@ def main():
     # 5. 在测试集上评估模型
     print('\n在测试集上评估模型...')
     
-    # 提取测试集特征并检测异常
-    test_errors, test_labels, test_paths = detect_anomalies(
+    # 提取测试集特征并计算重建误差
+    test_errors, test_labels, test_paths = compute_reconstruction_error(
         model=model,
         dataloader=test_loader,
         device=device,
@@ -223,12 +246,13 @@ def main():
     
     # 打印评估结果
     print('\n评估结果:')
-    print(f'AUC-ROC: {metrics["auc_roc"]:.4f}')
-    print(f'AUC-PR: {metrics["auc_pr"]:.4f}')
-    print(f'准确率: {metrics["accuracy"]:.4f}')
-    print(f'精确率: {metrics["precision"]:.4f}')
-    print(f'召回率: {metrics["recall"]:.4f}')
-    print(f'F1分数: {metrics["f1_score"]:.4f}')
+    # 安全访问评估指标，处理可能缺少的键
+    print(f'AUC-ROC: {metrics["auc_roc"]:.4f}' if "auc_roc" in metrics else 'AUC-ROC: N/A')
+    print(f'AUC-PR: {metrics["auc_pr"]:.4f}' if "auc_pr" in metrics else 'AUC-PR: N/A')
+    print(f'准确率: {metrics["accuracy"]:.4f}' if "accuracy" in metrics else '准确率: N/A')
+    print(f'精确率: {metrics["precision"]:.4f}' if "precision" in metrics else '精确率: N/A')
+    print(f'召回率: {metrics["recall"]:.4f}' if "recall" in metrics else '召回率: N/A')
+    print(f'F1分数: {metrics["f1_score"]:.4f}' if "f1_score" in metrics else 'F1分数: N/A')
     print(f'混淆矩阵:\n{metrics["confusion_matrix"]}')
     
     # 保存评估结果
@@ -291,13 +315,14 @@ def main():
         
         f.write('评估结果\n')
         f.write('-' * 20 + '\n')
-        f.write(f'AUC-ROC: {metrics["auc_roc"]:.4f}\n')
-        f.write(f'AUC-PR: {metrics["auc_pr"]:.4f}\n')
-        f.write(f'准确率: {metrics["accuracy"]:.4f}\n')
-        f.write(f'精确率: {metrics["precision"]:.4f}\n')
-        f.write(f'召回率: {metrics["recall"]:.4f}\n')
-        f.write(f'F1分数: {metrics["f1_score"]:.4f}\n')
-        f.write(f'\n混淆矩阵:\n{metrics["confusion_matrix"]}\n')
+        # 安全访问评估指标，处理可能缺少的键
+        f.write(f'AUC-ROC: {metrics["auc_roc"]:.4f}\n' if "auc_roc" in metrics else 'AUC-ROC: N/A\n')
+        f.write(f'AUC-PR: {metrics["auc_pr"]:.4f}\n' if "auc_pr" in metrics else 'AUC-PR: N/A\n')
+        f.write(f'准确率: {metrics["accuracy"]:.4f}\n' if "accuracy" in metrics else '准确率: N/A\n')
+        f.write(f'精确率: {metrics["precision"]:.4f}\n' if "precision" in metrics else '精确率: N/A\n')
+        f.write(f'召回率: {metrics["recall"]:.4f}\n' if "recall" in metrics else '召回率: N/A\n')
+        f.write(f'F1分数: {metrics["f1_score"]:.4f}\n' if "f1_score" in metrics else 'F1分数: N/A\n')
+        f.write(f'\n混淆矩阵:\n{metrics["confusion_matrix"]}\n' if "confusion_matrix" in metrics else '\n混淆矩阵: N/A\n')
     
     print(f'实验报告已保存至: {report_path}')
     print('\n图像异常检测任务完成！')
